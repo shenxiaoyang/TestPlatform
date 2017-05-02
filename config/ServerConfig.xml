@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+	<config company="InfoCore">
+		<Group GroupName="Group1">
+			<Server IPMIIP="" IPMIPassword="" IPMIUsername="" ServerIP="192.168.5.150" ServerName="osn3" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0"/>
+			<Server IPMIIP="192.168.9.104" IPMIPassword="infocore" IPMIUsername="root" ServerIP="192.168.5.151" ServerName="osn4" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0"/>
+		</Group>
+		<Group GroupName="Group2">
+			<Server IPMIIP="" IPMIPassword="" IPMIUsername="" ServerIP="192.168.5.152" ServerName="osn4" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0"/>
+			<Server IPMIIP="" IPMIPassword="" IPMIUsername="" ServerIP="192.168.5.153" ServerName="osn4" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0"/>
+		</Group>
+	</config>

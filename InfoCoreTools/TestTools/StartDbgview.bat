@@ -1,0 +1,1 @@
+start C:\Users\Administrator\Desktop\OSNAutoTest\Dbgview.exe  /k /v /om /f /l C:\Users\Administrator\Desktop\OSNAutoTest\dbgviewlog.log /m 200M

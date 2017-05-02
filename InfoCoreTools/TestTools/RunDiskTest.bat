@@ -1,0 +1,2 @@
+if exist "C:\Users\Administrator\Desktop\DiskTest.log" (del C:\Users\Administrator\Desktop\OSNAutoTest\DiskTest.log)
+C:\Users\Administrator\Desktop\DiskTest.exe d: 334 >C:\Users\Administrator\Desktop\OSNAutoTest\DiskTest.log 2>&1

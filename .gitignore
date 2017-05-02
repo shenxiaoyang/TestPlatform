@@ -1,0 +1,9 @@
+.idea
+*.log
+*.log.*
+/log/
+/build/
+test.py
+test1.py
+*.spec
+/dist/
