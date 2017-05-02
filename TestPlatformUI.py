@@ -53,6 +53,7 @@ class Server:
         self.ipmi_username = ''
         self.ipmi_password = ''
         self.virtual_flag = False
+        self.os = ''
 
 #后台数据刷新线程
 #1、每隔5秒刷新一次服务器状态，
@@ -192,30 +193,31 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
     def init_ui(self):
         logging.debug('初始化加载UI布局')
         self.setObjectName("MainWindow")  #设置窗体对象名
-        self.resize(710, 370)    #设置窗体的大小
+        self.resize(770, 370)    #设置窗体的大小
         self.setFixedSize(self.width(), self.height())  #固定窗口大小
         #self.setWindowFlags(Qt.WindowStaysOnTopHint)    #设置窗口置顶
 
         #设置treeWidget
         self.treeWidget = QTreeWidget(self)  #在栅格中创建一个treeWidget
-        self.treeWidget.setGeometry(QRect(10, 60, 380, 300))  # 设置栅格布局控件大小
+        self.treeWidget.setGeometry(QRect(10, 60, 440, 300))  # 设置栅格布局控件大小
         self.treeWidget.setObjectName("treeWidget") #设置树控件的对象名
         self.treeWidget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff) #设置垂直滚动条策略：关
         self.treeWidget.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContentsOnFirstShow)
         self.treeWidget.setItemsExpandable(False)   #设置节点不可手动展开关闭
         self.treeWidget.setObjectName("treeWidget") #设置treeWidget的Object名
-        self.treeWidget.setColumnCount(4)   #设置3列
+        self.treeWidget.setColumnCount(5)   #设置3列
         self.treeWidget.setAllColumnsShowFocus(True)
         self.treeWidget.header().setVisible(False)  # 隐藏treeWidget头
         self.treeWidget.setColumnWidth(0, 170)   #设置第一列列宽
         self.treeWidget.setColumnWidth(1, 60)
         self.treeWidget.setColumnWidth(2, 60)
         self.treeWidget.setColumnWidth(3, 60)
+        self.treeWidget.setColumnWidth(4, 60)
         self.load_tree()    #加载树列表的数据
 
         #设置tabWidget
         self.tabWidget = QTabWidget(self)    #在栅格中创建一个tabWidget
-        self.tabWidget.setGeometry(QRect(400, 60, 300, 300))  # 设置栅格布局控件大小
+        self.tabWidget.setGeometry(QRect(460, 60, 300, 300))  # 设置栅格布局控件大小
         self.tabWidget.setObjectName("tabWidget")   #设置tabWidget的Object名
         self.tab_1 = QWidget()
         self.tab_1.setObjectName("tab_1")
@@ -398,6 +400,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         root_item.setText(1, '状态')
         root_item.setText(2, 'IPMI状态')
         root_item.setText(3, '实/虚机')
+        root_item.setText(4, '操作系统')
         self.treeWidget.expandItem(root_item)  # 展开根节点
         for group_name in group_dict:
             group_item = QTreeWidgetItem(root_item)  # 创建Group节点
@@ -421,10 +424,17 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                 else:
                     server_item.setText(2, '电源关闭')
 
-                if group_dict[group_name].server_dict[server_ip].virtual_flag == '1':
+                if group_dict[group_name].server_dict[server_ip].virtual_flag == '1':   #设置实/虚机
                     server_item.setText(3, '实体机')
                 else:
                     server_item.setText(3, '虚拟机')
+
+                if group_dict[group_name].server_dict[server_ip].os == 'Linux':
+                    server_item.setText(4, 'Linux')
+                elif group_dict[group_name].server_dict[server_ip].os == 'Windows':
+                    server_item.setText(4, 'Windows')
+                else:
+                    server_item.setText(4, '未知')
 
     def update_tree_state(self):
         root_item = self.treeWidget.topLevelItem(0)
@@ -824,6 +834,8 @@ def read_config_from_xml_file(xml_file):
                     new_server.ipmi_password = server.getAttribute("IPMIPassword")
                 if server.hasAttribute("VirtualFlag"):
                     new_server.virtual_flag = server.getAttribute("VirtualFlag")
+                if server.hasAttribute("OS"):
+                    new_server.os = server.getAttribute("OS")
                 new_group.addServer(new_server)
             group_dict[new_group.group_name] = new_group
 
@@ -846,6 +858,7 @@ def save_config_from_xml_file(xml_file):
             server_node.setAttribute('IPMIUsername', server.ipmi_username)
             server_node.setAttribute('IPMIPassword', server.ipmi_password)
             server_node.setAttribute('VirtualFlag', server.virtual_flag)
+            server_node.setAttribute('OS',server.os)
             group_node.appendChild(server_node) #把Server节点添加到Group节点中
         root.appendChild(group_node)    #把Group节点添加到根节点中
     fp = open(xml_file,'w')
