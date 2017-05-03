@@ -22,12 +22,14 @@ def rebootRemoteMachine(ip, username, password):
 
 #远程正常关机，用PsExec64.exe远程调用系统本地CMD命令（shutdown -s -t 0）实现
 def shutdownRemoteMachine(ip, username, password):
+    logging.info('{}远程正常关机'.format(ip))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} cmd.exe /c shutdown -s -t 0 2>nul".format(psexec64,ip,username,password)
     os.popen(cmd)
 
 def bangRemoteMachine(ip, username, password):
+    logging.info('{} bang'.format(ip))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} {} -s >nul 2>nul".format(psexec64,ip,username,password,bang)
@@ -54,6 +56,7 @@ def disableRemoteNetworkAdapter(ip, username, password, adapterName):
     os.popen(cmd)
 
 def startRemoteMachineService(ip, username, password, serviceName):
+    logging.debug('启动{}的{}服务'.format(ip,serviceName))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} cmd.exe /c sc start ""{}"" 2>nul".format(psexec64,
@@ -64,6 +67,7 @@ def startRemoteMachineService(ip, username, password, serviceName):
     os.popen(cmd)
 
 def stopRemoteMachineService(ip, username, password, serviceName):
+    logging.debug('停止{}的{}服务'.format(ip, serviceName))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} cmd.exe /c sc stop ""{}"" 2>nul".format(psexec64,
@@ -74,6 +78,7 @@ def stopRemoteMachineService(ip, username, password, serviceName):
     os.popen(cmd)
 
 def chkconfigRemoteMachineServiceOn(ip, username, password, serviceName):
+    logging.debug('设置{}的{}服务为开机自动启动'.format(ip, serviceName))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} cmd.exe /c sc config ""{}"" start=auto 2>nul".format(psexec64,
@@ -83,7 +88,8 @@ def chkconfigRemoteMachineServiceOn(ip, username, password, serviceName):
                                                                                         serviceName)
     os.popen(cmd)
 
-def chkconfigRemoteServiceOff(ip, username, password, serviceName):
+def chkconfigRemoteMachineServiceOff(ip, username, password, serviceName):
+    logging.debug('设置{}的{}服务为开机手动启动'.format(ip, serviceName))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     cmd = r"{} -d \\{} -u {} -p {} cmd.exe /c sc config ""{}"" start=demand 2>nul".format(psexec64,
@@ -94,6 +100,7 @@ def chkconfigRemoteServiceOff(ip, username, password, serviceName):
     os.popen(cmd)
 
 def queryRemoteService(ip, username, password, serviceName):
+    logging.debug('查询{}的{}的状态'.format(ip,serviceName))
     if os.path.exists(psexec64) == False:
         sys.exit(1)
     state = 'UNKNOW'
