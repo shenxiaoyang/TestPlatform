@@ -81,10 +81,12 @@ class RefreshStateThread(threading.Thread):
     def run(self):
         while 1:
             logging.debug('{} 定时刷新状态'.format(self.thread_name))
+            mutex_lock_group_dict.acquire()
             for group_name in group_dict:
                 for server_ip in group_dict[group_name].server_dict:
                     ping_thread = PingThread(ip=server_ip)
                     ping_thread.start()
+            mutex_lock_group_dict.release()
             time.sleep(5)   #每隔5秒后台刷新一次状态
 
 class PingThread(threading.Thread):
@@ -95,7 +97,9 @@ class PingThread(threading.Thread):
         self.ip = ip
     def run(self):
         logging.debug('PingThread:ping {}'.format(self.ip))
+        mutex_lock_server_state_dict.acquire()
         old_state = server_state_dict[self.ip]
+        mutex_lock_server_state_dict.release()
         new_state = WindowsCMD.pingIP(self.ip)
         if new_state != old_state:
             mutex_lock_server_state_dict.acquire()
@@ -119,18 +123,55 @@ class MonitorUIThread(QThread):
             self.signal_update_tab_1.emit()
             self.event.clear()  #重新设置线程阻塞
 
-class CollectAllLogsThread(threading.Thread):
-    daemon = True   #设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, name, parent=None):
-        super(CollectAllLogsThread, self).__init__(parent)
+class CollectServerLogsThread(threading.Thread):
+    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
+    def __init__(self, ip, time, name=None, parent=None):
+        super(CollectServerLogsThread, self).__init__(parent)
         self.thread_name = name  # 将传递过来的name构造到类中的name
+        self.ip = ip
+        self.time = time
+
     def run(self):
-        current_time = WindowsCMD.getCurrentDatetimeString()
+        logging.debug('准备收集{}日志'.format(self.ip))
         for group_name in group_dict:
             for server_ip in group_dict[group_name].server_dict:
-                if server_state_dict[server_ip] == 0:
+                if server_ip == self.ip:
                     server = group_dict[group_name].server_dict[server_ip]
-                    WindowsCMD.collect_server_log(server.server_ip,server.username,server.password,current_time)
+                    WindowsCMD.collect_server_log(server.server_ip, server.username, server.password, self.time)
+
+class StartVirtualMachineThread(threading.Thread):
+    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
+    def __init__(self, host_ip,host_username, host_password, virtual_machine_name, name=None, parent=None):
+        super(StartVirtualMachineThread, self).__init__(parent)
+        self.thread_name = name  # 将传递过来的name构造到类中的name
+        self.host_ip = host_ip
+        self.host_username = host_username
+        self.host_password = host_password
+        self.virtual_machine_name = virtual_machine_name
+
+    def run(self):
+        logging.debug('StartVirtualMachineThread：{}打开VM电源'.format(self.virtual_machine_name))
+        vSphereCLI.startVirtualMachineHard(self.host_ip,
+                                           self.host_username,
+                                           self.host_password,
+                                           self.virtual_machine_name)
+
+class StopVirtualMachineThread(threading.Thread):
+    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
+    def __init__(self, host_ip,host_username, host_password, virtual_machine_name, name=None, parent=None):
+        super(StopVirtualMachineThread, self).__init__(parent)
+        self.thread_name = name  # 将传递过来的name构造到类中的name
+        self.host_ip = host_ip
+        self.host_username = host_username
+        self.host_password = host_password
+        self.virtual_machine_name = virtual_machine_name
+
+    def run(self):
+        logging.debug('StartVirtualMachineThread：{}关闭VM电源'.format(self.virtual_machine_name))
+        vSphereCLI.stopVirtualMachineHard(self.host_ip,
+                                          self.host_username,
+                                          self.host_password,
+                                          self.virtual_machine_name)
 
 class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWindow
     def __init__(self, parent=None):    #主窗体构造函数
@@ -216,11 +257,11 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
 
         # 设置树的右键菜单
         self.rightMenu = QMenu(self.treeWidget)  # 在树中创建右键菜单
+        self.action_collect_logs = QAction(self.rightMenu)  # 创建菜单项[收集日志]
         self.action_normal_shutdown = QAction(self.rightMenu)  # 创建菜单项[正常关机]
         self.action_ipmi_poweroff = QAction(self.rightMenu)  # 创建菜单项[IPMI关机]
         self.action_ipmi_poweron = QAction(self.rightMenu)  # 创建菜单项[IPMI开机]
         self.action_bang = QAction(self.rightMenu)  # 创建菜单项[bang]
-        self.action_collect_logs = QAction(self.rightMenu)  # 创建菜单项[收集日志]
         self.action_modify_server_config = QAction(self.rightMenu)  # 创建菜单项[修改配置]
         self.action_start_service = QAction(self.rightMenu)  # 创建菜单项[启动服务]
         self.action_stop_service = QAction(self.rightMenu)  # 创建菜单项[停止服务]
@@ -229,12 +270,13 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         self.action_virtual_machine_power_on = QAction(self.rightMenu) #创建菜单项[VM打开电源]
         self.action_virtual_machine_power_off = QAction(self.rightMenu) #创建菜单项[VM关闭电源]
 
-        self.rightMenu.addAction(self.action_normal_shutdown)  # 把菜单项添加到右键中
+        # 把菜单项添加到右键中
+        self.rightMenu.addAction(self.action_collect_logs)
+        self.rightMenu.addSeparator()  # 添加分割符
+        self.rightMenu.addAction(self.action_normal_shutdown)
         self.rightMenu.addAction(self.action_ipmi_poweroff)
         self.rightMenu.addAction(self.action_ipmi_poweron)
         self.rightMenu.addAction(self.action_bang)
-        self.rightMenu.addSeparator()  # 添加分割符
-        self.rightMenu.addAction(self.action_collect_logs)
         self.rightMenu.addSeparator()  # 添加分割符
         self.rightMenu.addAction(self.action_modify_server_config)
         self.rightMenu.addSeparator()  # 添加分割符
@@ -339,15 +381,19 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         self.refresh_state_thread.start()
 
     def start_collect_all_logs_thread(self):
-        self.collect_all_logs_thread = CollectAllLogsThread('CollectAllLogsThread')
-        logging.debug('启动CollectAllLogsThread线程')
-        self.collect_all_logs_thread.start()
+        current_time = WindowsCMD.getCurrentDatetimeString()
+        for group_name in group_dict:
+            for server_ip in group_dict[group_name].server_dict:
+                if server_state_dict[server_ip] == 0:
+                    collect_server_log_thread = CollectServerLogsThread(ip=server_ip, time=current_time)
+                    collect_server_log_thread.start()
 
     # 显示右键菜单
     def showRightMenu(self):
         self.rightMenu.exec_(QCursor.pos())
 
     def triggered_action_virtual_machine_power_on(self):
+        logging.debug('右键[VM打开电源]')
         if self.treeWidget.selectedItems() != []:
             selected_item = self.treeWidget.selectedItems()[0]  # 获取选中节点
             if selected_item == self.treeWidget.topLevelItem(0):  # 判断是否选中根节点
@@ -360,12 +406,15 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                     for server_ip in group_dict[group_name].server_dict:
                         if select_server_ip == server_ip:
                             server = group_dict[group_name].server_dict[server_ip]
-                            vSphereCLI.startVirtualMachineHard(server.host_ip,
-                                                               server.host_username,
-                                                               server.host_password,
-                                                               server.virtual_machine_name)
+                            start_vm_thread = StartVirtualMachineThread(server.host_ip,
+                                                                        server.host_username,
+                                                                        server.host_password,
+                                                                        server.virtual_machine_name)
+                            start_vm_thread.start()
+
 
     def triggered_action_virtual_machine_power_off(self):
+        logging.debug('右键[VM关闭电源]')
         if self.treeWidget.selectedItems() != []:
             selected_item = self.treeWidget.selectedItems()[0]  # 获取选中节点
             if selected_item == self.treeWidget.topLevelItem(0):  # 判断是否选中根节点
@@ -378,10 +427,11 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                     for server_ip in group_dict[group_name].server_dict:
                         if select_server_ip == server_ip:
                             server = group_dict[group_name].server_dict[server_ip]
-                            vSphereCLI.stopVirtualMachineHard(server.host_ip,
-                                                              server.host_username,
-                                                              server.host_password,
-                                                              server.virtual_machine_name)
+                            stop_vm_thread = StopVirtualMachineThread(server.host_ip,
+                                                                      server.host_username,
+                                                                      server.host_password,
+                                                                      server.virtual_machine_name)
+                            stop_vm_thread.start()
 
     def triggered_action_start_service(self):
         if self.treeWidget.selectedItems() != []:
@@ -466,6 +516,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
             current_time = time
         else:
             current_time = WindowsCMD.getCurrentDatetimeString()
+
         if self.treeWidget.selectedItems() != []:
             selected_item = self.treeWidget.selectedItems()[0]  # 获取选中节点
             if selected_item == self.treeWidget.topLevelItem(0):  #判断是否选中根节点
@@ -474,12 +525,13 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                 pass
             else:  # 判断是否选中Server节点
                 select_server_ip = selected_item.text(0)
+                mutex_lock_group_dict.acquire()
                 for group_name in group_dict:
                     for server_ip in group_dict[group_name].server_dict:
                         if select_server_ip == server_ip:
-                            select_username = group_dict[group_name].server_dict[server_ip].username
-                            select_password = group_dict[group_name].server_dict[server_ip].password
-                WindowsCMD.collect_server_log(select_server_ip,select_username,select_password,current_time)
+                            collect_server_log_thread = CollectServerLogsThread(ip=select_server_ip, time=current_time)
+                            collect_server_log_thread.start()
+                mutex_lock_group_dict.release()
 
     #右键[修改配置]事件处理
     def triggered_action_modify_server_config(self):
@@ -504,11 +556,13 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                 pass
             else:  # 判断是否选中Server节点
                 select_server_ip = selected_item.text(0)
+                mutex_lock_group_dict.acquire()
                 for group_name in group_dict:
                     for server_ip in group_dict[group_name].server_dict:
                         if select_server_ip == server_ip:
                             select_username = group_dict[group_name].server_dict[server_ip].username
                             select_password = group_dict[group_name].server_dict[server_ip].password
+                mutex_lock_group_dict.release()
                 PsExc64.shutdownRemoteMachine(select_server_ip, select_username, select_password)
 
     # 右键[bang]事件处理
@@ -521,11 +575,13 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                 pass
             else:  # 判断是否选中Server节点
                 select_server_ip = selected_item.text(0)
+                mutex_lock_group_dict.acquire()
                 for group_name in group_dict:
                     for server_ip in group_dict[group_name].server_dict:
                         if select_server_ip == server_ip:
                             select_username = group_dict[group_name].server_dict[server_ip].username
                             select_password = group_dict[group_name].server_dict[server_ip].password
+                mutex_lock_group_dict.release()
                 PsExc64.bangRemoteMachine(select_server_ip, select_username, select_password)
 
     #树项选中事件处理
@@ -543,11 +599,14 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
             else:  # 选中Server节点
                 logging.debug('选中了Server节点：{}'.format(selected_item.text(0)))
                 self.btn_delServer.setDisabled(False)   #把删除服务器按钮标记可用
+                mutex_lock_group_dict.acquire()
                 server_node = group_dict[selected_item.parent().text(0)].server_dict[selected_item.text(0)]
+                mutex_lock_group_dict.release()
                 self.label_username.setText("当前设置用户：{}".format(server_node.username))   #设置tab[摘要]信息
                 self.label_group_name.setText("所属群组：{}".format(selected_item.parent().text(0)))
                 self.label_server_name.setText("服务器名：{}".format(server_node.server_name))
                 self.label_server_ip.setText("服务器IP地址：{}".format(server_node.server_ip))
+                mutex_lock_server_state_dict.acquire()
                 if server_state_dict[server_node.server_ip] == '':  # 设置状态
                     self.label_server_state.setText("服务器状态：未知")
                     self.rightMenu.setDisabled(True)
@@ -563,6 +622,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                     self.action_bang.setDisabled(False)
                     self.action_collect_logs.setDisabled(False)
                     self.action_normal_shutdown.setDisabled(False)
+                mutex_lock_server_state_dict.release()
 
                 if ipmi_state_dict[server_node.server_ip] == '':
                     self.label_ipmi_config.setText("IPMI配置:未配置")
@@ -584,6 +644,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
     def del_server(self):
         mutex_lock_group_dict.acquire()
         selected_item = self.treeWidget.selectedItems()[0]
+        mutex_lock_server_state_dict.acquire()
         if selected_item.parent().parent() != None: #判断选中节点是否是server节点
             del_group_name = selected_item.parent().text(0)
             del_server_ip = selected_item.text(0)
@@ -596,6 +657,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                 server_state_dict.pop(server_ip)
                 ipmi_state_dict.pop(server_ip)
             group_dict.pop(del_group_name)
+        mutex_lock_server_state_dict.release()
         save_config_from_xml_file('.\config\ServerConfig.xml')
         self.update_tree()
         self.btn_delServer.setDisabled(True)    #删除后失去当前选中焦点,设置删除按钮不可用
@@ -611,6 +673,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         root_item.setText(4, '实/虚机')
         root_item.setText(5, '操作系统')
         self.treeWidget.expandItem(root_item)  # 展开根节点
+        mutex_lock_group_dict.acquire()
         for group_name in group_dict:
             group_item = QTreeWidgetItem(root_item)  # 创建Group节点
             group_item.setText(0, group_name)  # 设置节点显示文本
@@ -618,6 +681,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
             for server_ip in group_dict[group_name].server_dict:
                 server_item = QTreeWidgetItem(group_item)  # 创建Server子节点
                 server_item.setText(0, server_ip)   #设置IP地址
+                mutex_lock_server_state_dict.acquire()
                 if server_state_dict[server_ip] == '':  #设置状态
                     server_item.setText(1, '未获取到')
                 elif server_state_dict[server_item.text(0)] == 1:
@@ -625,6 +689,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                     self.action_bang.setDisabled(True)
                 else:
                     server_item.setText(1, '在线')
+                mutex_lock_server_state_dict.release()
 
                 if ipmi_state_dict[server_ip] == '':  #设置IPMI状态
                     server_item.setText(3, '未配置')
@@ -644,6 +709,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
                     server_item.setText(5, 'Windows')
                 else:
                     server_item.setText(5, '未知')
+        mutex_lock_group_dict.release()
 
     def update_tree_state(self):
         root_item = self.treeWidget.topLevelItem(0)
@@ -652,12 +718,14 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
             for j in range(0,group_item.childCount()):
                 server_item = group_item.child(j)
                 #更新树的服务器状态
+                mutex_lock_server_state_dict.acquire()
                 if server_state_dict[server_item.text(0)] == '':
                     server_item.setText(1, '未获取到')
                 elif server_state_dict[server_item.text(0)] == 1:
                     server_item.setText(1, '离线')
                 else:
                     server_item.setText(1, '在线')
+                mutex_lock_server_state_dict.release()
 
                 #更新树的IPMI状态
                 if ipmi_state_dict[server_item.text(0)] == '':  #设置状态
@@ -945,6 +1013,7 @@ class AddServerDlg(QDialog):
             new_host_username = ''
             new_host_password = ''
 
+        mutex_lock_server_state_dict.acquire()
         if new_server_ip not in server_state_dict.keys():
             new_server = Server()
             new_server.server_name = new_server_name
@@ -971,6 +1040,7 @@ class AddServerDlg(QDialog):
             server_state_dict[new_server.server_ip] = ''
             ipmi_state_dict[new_server.server_ip] = ''
             self.sin1.emit()    #发射自定义信号（配置更新后发射信号）
+        mutex_lock_server_state_dict.release()
         mutex_lock_group_dict.release()
         self.close()
 
@@ -1004,6 +1074,7 @@ class ModifyServerConfigDlg(AddServerDlg):
         self.set_default_text_edit(selected_node_ip)
 
     def set_default_text_edit(self,selected_node_ip):
+        mutex_lock_group_dict.acquire()
         for group_name in group_dict:
             for server_ip in group_dict[group_name].server_dict:
                 if selected_node_ip == server_ip:
@@ -1027,6 +1098,7 @@ class ModifyServerConfigDlg(AddServerDlg):
                         self.text_edit_host_password.setPlainText(server.host_password)
                     else:
                         self.checkbox_is_virtual_machine.setChecked(False)
+        mutex_lock_group_dict.release()
 
     def clicked_btn_apply(self):
         mutex_lock_group_dict.acquire()
@@ -1073,7 +1145,9 @@ class ModifyServerConfigDlg(AddServerDlg):
         else:
             group_dict[new_group_name].addServer(new_server)
         save_config_from_xml_file('.\config\ServerConfig.xml')
+        mutex_lock_server_state_dict.acquire()
         server_state_dict[new_server.server_ip] = ''
+        mutex_lock_server_state_dict.release()
         ipmi_state_dict[new_server.server_ip] = ''
         self.sin1.emit()    #发射自定义信号（配置更新后发射信号）
         mutex_lock_group_dict.release()
@@ -1099,7 +1173,9 @@ def read_config_from_xml_file(xml_file):
                     new_server.server_name = server.getAttribute("ServerName")
                 if server.hasAttribute("ServerIP"):
                     new_server.server_ip = server.getAttribute("ServerIP")
+                    mutex_lock_server_state_dict.acquire()
                     server_state_dict[new_server.server_ip] = ''    #初始化服务器状态字典
+                    mutex_lock_server_state_dict.release()
                     ipmi_state_dict[new_server.server_ip] = ''
                 if server.hasAttribute("ServerUsername"):
                     new_server.username = server.getAttribute("ServerUsername")
@@ -1124,13 +1200,16 @@ def read_config_from_xml_file(xml_file):
                 if server.hasAttribute("HostPassword"):
                     new_server.host_password = server.getAttribute("HostPassword")
                 new_group.addServer(new_server)
+            mutex_lock_group_dict.acquire()
             group_dict[new_group.group_name] = new_group
+            mutex_lock_group_dict.release()
 
 def save_config_from_xml_file(xml_file):
     doc = xml.dom.minidom.Document()    #在内存中创建一个空文档
     root = doc.createElement('config')  #创建根节点对象
     root.setAttribute('company', 'InfoCore')    #设置根节点属性
     doc.appendChild(root)   #将根节点添加到文档对象中
+    mutex_lock_group_dict.acquire()
     for group_name in group_dict:  #遍历群组配置
         group_node = doc.createElement('Group') #创建Group节点
         group_node.setAttribute('GroupName', group_name)    #设置Group节点属性
@@ -1152,6 +1231,7 @@ def save_config_from_xml_file(xml_file):
             server_node.setAttribute('HostPassword',server.host_password)
             group_node.appendChild(server_node) #把Server节点添加到Group节点中
         root.appendChild(group_node)    #把Group节点添加到根节点中
+    mutex_lock_group_dict.release()
     fp = open(xml_file,'w')
     doc.writexml(fp, indent='\t', addindent='\t', newl='\n')
     fp.close()

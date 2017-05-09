@@ -11,39 +11,43 @@ zhPattern = re.compile(u'[\u4e00-\u9fa5]+')
 
 def startVirtualMachineSoft(esxiIP, esxiUsername, esxiPassword, vmName):
     vmx = getVmxByVirtualMachineName(esxiIP, esxiUsername, esxiPassword, vmName)
-    if zhPattern.findall(vmx):
-        logger.error(r'不支持中文名称的虚拟机')
-        exit(1)
-    cmd = r'{} {}'.format(vmx, r'start soft')
-    result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
-    logger.debug(r'{} {}'.format(vmx.split('/')[-1],result))
+    if vmx:
+        if zhPattern.findall(vmx):
+            logger.error(r'不支持中文名称的虚拟机')
+            exit(1)
+        cmd = r'{} {}'.format(vmx, r'start soft')
+        result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
+        logger.debug(r'{} {}'.format(vmx.split('/')[-1],result.strip()))
 
 def startVirtualMachineHard(esxiIP, esxiUsername, esxiPassword, vmName):
     vmx = getVmxByVirtualMachineName(esxiIP, esxiUsername, esxiPassword, vmName)
-    if zhPattern.findall(vmx):
-        logger.error(r'不支持中文名称的虚拟机')
-        exit(1)
-    cmd = r'{} {}'.format(vmx, r'start hard')
-    result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
-    logger.debug(r'{} {}'.format(vmx.split('/')[-1],result))
+    if vmx:
+        if zhPattern.findall(vmx):
+            logger.error(r'不支持中文名称的虚拟机')
+            exit(1)
+        cmd = r'{} {}'.format(vmx, r'start hard')
+        result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
+        logger.debug(r'{} {}'.format(vmx.split('/')[-1],result.strip()))
 
 def stopVirtualMachineSoft(esxiIP, esxiUsername, esxiPassword, vmName):
     vmx = getVmxByVirtualMachineName(esxiIP, esxiUsername, esxiPassword, vmName)
-    if zhPattern.findall(vmx):
-        logger.error(r'不支持中文名称的虚拟机')
-        exit(1)
-    cmd = r'{} {}'.format(vmx, r'stop soft')
-    result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
-    logger.debug(r'{} {}'.format(vmx.split('/')[-1],result))
+    if vmx:
+        if zhPattern.findall(vmx):
+            logger.error(r'不支持中文名称的虚拟机')
+            exit(1)
+        cmd = r'{} {}'.format(vmx, r'stop soft')
+        result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
+        logger.debug(r'{} {}'.format(vmx.split('/')[-1],result.strip()))
 
 def stopVirtualMachineHard(esxiIP, esxiUsername, esxiPassword, vmName):
     vmx = getVmxByVirtualMachineName(esxiIP, esxiUsername, esxiPassword, vmName)
-    if zhPattern.findall(vmx):
-        logger.error(r'不支持中文名称的虚拟机')
-        exit(1)
-    cmd = r'{} {}'.format(vmx, r'stop hard')
-    result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
-    logger.debug(r'{} {}'.format(vmx.split('/')[-1],result))
+    if vmx:
+        if zhPattern.findall(vmx):
+            logger.error(r'不支持中文名称的虚拟机')
+            exit(1)
+        cmd = r'{} {}'.format(vmx, r'stop hard')
+        result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd)
+        logger.debug(r'{} {}'.format(vmx.split('/')[-1],result.strip()))
 
 def getVirtualMachineList(esxiIP, esxiUsername, esxiPassword):
     result = callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, r'-l')
@@ -70,9 +74,13 @@ def callVirtualMachineCommadLine(esxiIP, esxiUsername, esxiPassword, cmd):
 def getVmxByVirtualMachineName(ip, username, password, name):
     vmxNamePattern = re.compile(name)
     vmList = getVirtualMachineList(ip, username, password)
-    for vmx in vmList:
-        if vmxNamePattern.search(vmx):
-            return vmx
+    if vmList ==[]:
+        logging.error('请检查配置，是否是ESXi主机')
+        return False
+    else:
+        for vmx in vmList:
+            if vmxNamePattern.search(vmx):
+                return vmx
 
 #vmx = r'/vmfs/volumes/549af783-2bcf0b8c-edd4-001b21c5cdf2/沈晓阳7.0-192.168.5.150/沈晓阳7.0-192.168.5.150.vmx'
 #vm_start_soft(r'192.168.4.66',r'root',r'infocore',vmx)

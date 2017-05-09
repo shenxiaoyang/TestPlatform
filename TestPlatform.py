@@ -17,9 +17,7 @@ from TestPlatformUI import MainWindows,read_config_from_xml_file
 
 if __name__ == "__main__":
     try:
-        print(111)
         read_config_from_xml_file('.\config\ServerConfig.xml')
-        print(222)
         app = QtWidgets.QApplication(sys.argv)
         main_window = MainWindows()
         logging.debug('打开主窗口')
