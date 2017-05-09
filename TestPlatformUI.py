@@ -1,4 +1,4 @@
-# -*- coding:utf-8 -*-
+# -*- coding: utf-8 -*-
 #导入系统模块
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
@@ -18,18 +18,21 @@ logger = logging.getLogger('root.TestPlatformUI')
 #导入自定义模块
 from InfoCoreTools import WindowsCMD
 from InfoCoreTools import PsExc64
+from InfoCoreTools import vSphereCLI
 
 #全局变量（注意：全局变量只在一个.py中生效）
 global group_dict
 global event
-global mutex_lock
+global mutex_lock_group_dict
+global mutex_lock_server_state_dict
 global server_state_dict
 global ipmi_state_dict
 global service_list
 global service_state_dict
 group_dict = collections.OrderedDict()
 event = threading.Event()
-mutex_lock = threading.RLock()
+mutex_lock_group_dict = threading.RLock()
+mutex_lock_server_state_dict = threading.RLock()
 server_state_dict = {}
 ipmi_state_dict = {}
 service_state_dict = {}
@@ -61,8 +64,12 @@ class Server:
         self.ipmi_ip = ''
         self.ipmi_username = ''
         self.ipmi_password = ''
-        self.virtual_flag = False
+        self.virtual_flag = ''
         self.os_type = ''
+        self.virtual_machine_name = ''
+        self.host_ip = ''
+        self.host_username = ''
+        self.host_password = ''
 
 #后台数据刷新线程
 #1、每隔5秒刷新一次服务器状态，
@@ -73,21 +80,28 @@ class RefreshStateThread(threading.Thread):
         self.thread_name = name  # 将传递过来的name构造到类中的name
     def run(self):
         while 1:
-            mutex_lock.acquire()
             logging.debug('{} 定时刷新状态'.format(self.thread_name))
-            flag_server_state = False    #状态变更标记，Ture说明状态已经变更
             for group_name in group_dict:
                 for server_ip in group_dict[group_name].server_dict:
-                    old_state = server_state_dict[server_ip]
-                    new_state = WindowsCMD.pingIP(server_ip)
-                    if new_state != old_state:  #如果状态变更，则需要刷新页面
-                        flag_server_state = True
-                        server_state_dict[server_ip] = new_state
-
-            if flag_server_state:
-                event.set() #取消阻塞线程MonitorUITread
-            mutex_lock.release()
+                    ping_thread = PingThread(ip=server_ip)
+                    ping_thread.start()
             time.sleep(5)   #每隔5秒后台刷新一次状态
+
+class PingThread(threading.Thread):
+    daemon = True
+    def __init__(self, ip, name=None, parent=None):
+        super(PingThread,self).__init__(parent)
+        self.thread_name = name
+        self.ip = ip
+    def run(self):
+        logging.debug('PingThread:ping {}'.format(self.ip))
+        old_state = server_state_dict[self.ip]
+        new_state = WindowsCMD.pingIP(self.ip)
+        if new_state != old_state:
+            mutex_lock_server_state_dict.acquire()
+            server_state_dict[self.ip] = new_state
+            mutex_lock_server_state_dict.release()
+            event.set()
 
 class MonitorUIThread(QThread):
     daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
@@ -309,6 +323,8 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         self.action_stop_service.triggered.connect(self.triggered_action_stop_service)
         self.action_set_service_start_on.triggered.connect(self.triggered_action_set_service_start_on)
         self.action_set_service_start_off.triggered.connect(self.triggered_action_set_service_start_off)
+        self.action_virtual_machine_power_on.triggered.connect(self.triggered_action_virtual_machine_power_on)
+        self.action_virtual_machine_power_off.triggered.connect(self.triggered_action_virtual_machine_power_off)
 
     def start_monitor_ui_thread(self):
         logging.debug('启动界面数据刷新线程')
@@ -330,6 +346,42 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
     # 显示右键菜单
     def showRightMenu(self):
         self.rightMenu.exec_(QCursor.pos())
+
+    def triggered_action_virtual_machine_power_on(self):
+        if self.treeWidget.selectedItems() != []:
+            selected_item = self.treeWidget.selectedItems()[0]  # 获取选中节点
+            if selected_item == self.treeWidget.topLevelItem(0):  # 判断是否选中根节点
+                pass
+            elif selected_item.parent() == self.treeWidget.topLevelItem(0):  # 判断是否选中Group节点
+                pass
+            else:  # 判断是否选中Server节点
+                select_server_ip = selected_item.text(0)
+                for group_name in group_dict:
+                    for server_ip in group_dict[group_name].server_dict:
+                        if select_server_ip == server_ip:
+                            server = group_dict[group_name].server_dict[server_ip]
+                            vSphereCLI.startVirtualMachineHard(server.host_ip,
+                                                               server.host_username,
+                                                               server.host_password,
+                                                               server.virtual_machine_name)
+
+    def triggered_action_virtual_machine_power_off(self):
+        if self.treeWidget.selectedItems() != []:
+            selected_item = self.treeWidget.selectedItems()[0]  # 获取选中节点
+            if selected_item == self.treeWidget.topLevelItem(0):  # 判断是否选中根节点
+                pass
+            elif selected_item.parent() == self.treeWidget.topLevelItem(0):  # 判断是否选中Group节点
+                pass
+            else:  # 判断是否选中Server节点
+                select_server_ip = selected_item.text(0)
+                for group_name in group_dict:
+                    for server_ip in group_dict[group_name].server_dict:
+                        if select_server_ip == server_ip:
+                            server = group_dict[group_name].server_dict[server_ip]
+                            vSphereCLI.stopVirtualMachineHard(server.host_ip,
+                                                              server.host_username,
+                                                              server.host_password,
+                                                              server.virtual_machine_name)
 
     def triggered_action_start_service(self):
         if self.treeWidget.selectedItems() != []:
@@ -439,6 +491,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         else:  # 判断是否选中Server节点
             select_server_ip = selected_item.text(0)
         modify_server_config_dlg = ModifyServerConfigDlg(self, selected_node_ip=select_server_ip)
+        modify_server_config_dlg.sin1.connect(self.update_tree)
         modify_server_config_dlg.show()
 
     # 右键[正常关机]事件处理
@@ -529,7 +582,7 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
 
     #删除按钮事件处理
     def del_server(self):
-        mutex_lock.acquire()
+        mutex_lock_group_dict.acquire()
         selected_item = self.treeWidget.selectedItems()[0]
         if selected_item.parent().parent() != None: #判断选中节点是否是server节点
             del_group_name = selected_item.parent().text(0)
@@ -546,9 +599,10 @@ class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWin
         save_config_from_xml_file('.\config\ServerConfig.xml')
         self.update_tree()
         self.btn_delServer.setDisabled(True)    #删除后失去当前选中焦点,设置删除按钮不可用
-        mutex_lock.release()
+        mutex_lock_group_dict.release()
 
     def load_tree(self):
+        logging.debug('加载整个树形列表')
         root_item = QTreeWidgetItem(self.treeWidget)  # 创建tree的根节点
         root_item.setText(0, 'InfoCore测试平台')  # 设置根节点文本
         root_item.setText(1, '状态')
@@ -639,102 +693,175 @@ class AddServerDlg(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        self.resize(450, 150)
+        self.resize(450, 250)
+        self.setFixedSize(self.width(), self.height())
         self.setSizeGripEnabled(True)
 
-        #添加栅格布局
-        self.gridLayoutWidget = QWidget(self)
-        self.gridLayoutWidget.setGeometry(QRect(10, 10, 431, 101))
-        self.gridLayoutWidget.setObjectName("gridLayoutWidget")
-        self.gridLayout = QGridLayout(self.gridLayoutWidget)
+        #添加栅格布局1
+        self.gridLayoutWidget_1 = QWidget(self)
+        self.gridLayoutWidget_1.setGeometry(QRect(10, 10, 430, 120))
+        self.gridLayoutWidget_1.setObjectName("gridLayoutWidget_1")
+        self.gridLayout = QGridLayout(self.gridLayoutWidget_1)
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
         self.gridLayout.setObjectName("gridLayout")
 
         #设置界面上的各个标签布局
-        self.label_group_name = QLabel(self.gridLayoutWidget)
+        self.label_group_name = QLabel(self.gridLayoutWidget_1)
         self.label_group_name.setObjectName("label_group_name")
         self.gridLayout.addWidget(self.label_group_name, 1, 1, 1, 1)
 
-        self.label_server_ip = QLabel(self.gridLayoutWidget)
+        self.label_server_ip = QLabel(self.gridLayoutWidget_1)
         self.label_server_ip.setObjectName("label_server_ip")
         self.gridLayout.addWidget(self.label_server_ip, 2, 1, 1, 1)
 
-        self.label_server_username = QLabel(self.gridLayoutWidget)
+        self.label_server_username = QLabel(self.gridLayoutWidget_1)
         self.label_server_username.setObjectName("label_server_username")
         self.gridLayout.addWidget(self.label_server_username, 3, 1, 1, 1)
 
-        self.label_server_password = QLabel(self.gridLayoutWidget)
+        self.label_server_password = QLabel(self.gridLayoutWidget_1)
         self.label_server_password.setObjectName("label_server_password")
         self.gridLayout.addWidget(self.label_server_password, 4, 1, 1, 1)
 
-        self.label_server_name = QLabel(self.gridLayoutWidget)
+        self.label_os_type = QLabel(self.gridLayoutWidget_1)
+        self.label_os_type.setObjectName("label_os_type")
+        self.gridLayout.addWidget(self.label_os_type, 5, 1, 1, 1)
+
+        self.label_server_name = QLabel(self.gridLayoutWidget_1)
         self.label_server_name.setObjectName("label_server_name")
         self.gridLayout.addWidget(self.label_server_name, 1, 3, 1, 1)
 
-        self.label_ipmi_ip = QLabel(self.gridLayoutWidget)
+        self.label_ipmi_ip = QLabel(self.gridLayoutWidget_1)
         self.label_ipmi_ip.setObjectName("label_ipmi_ip")
         self.gridLayout.addWidget(self.label_ipmi_ip, 2, 3, 1, 1)
 
-        self.label_ipmi_username = QLabel(self.gridLayoutWidget)
+        self.label_ipmi_username = QLabel(self.gridLayoutWidget_1)
         self.label_ipmi_username.setObjectName("label_ipmi_username")
         self.gridLayout.addWidget(self.label_ipmi_username, 3, 3, 1, 1)
 
-        self.label_ipmi_password = QLabel(self.gridLayoutWidget)
+        self.label_ipmi_password = QLabel(self.gridLayoutWidget_1)
         self.label_ipmi_password.setObjectName("label_ipmi_password")
         self.gridLayout.addWidget(self.label_ipmi_password, 4, 3, 1, 1)
 
         #界面上个各个文本编辑框布局
-        self.text_edit_group_name = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_group_name = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_group_name.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_group_name.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_group_name.setObjectName("text_edit_group_name")
         self.gridLayout.addWidget(self.text_edit_group_name, 1, 2, 1, 1)
 
-        self.text_edit_server_ip = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_server_ip = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_server_ip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_ip.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_ip.setObjectName("text_edit_server_ip")
         self.gridLayout.addWidget(self.text_edit_server_ip, 2, 2, 1, 1)
 
-        self.text_edit_server_username = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_server_username = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_server_username.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_username.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_username.setObjectName("text_edit_server_username")
         self.gridLayout.addWidget(self.text_edit_server_username, 3, 2, 1, 1)
 
-        self.text_edit_server_password = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_server_password = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_server_password.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_password.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_password.setObjectName("text_edit_server_password")
         self.gridLayout.addWidget(self.text_edit_server_password, 4, 2, 1, 1)
 
-        self.text_edit_server_name = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_os_type = QPlainTextEdit(self.gridLayoutWidget_1)
+        self.text_edit_os_type.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_os_type.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_os_type.setObjectName("text_edit_os_type")
+        self.gridLayout.addWidget(self.text_edit_os_type, 5, 2, 1, 1)
+
+        self.text_edit_server_name = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_server_name.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_name.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_server_name.setObjectName("text_edit_server_name")
         self.gridLayout.addWidget(self.text_edit_server_name, 1, 4, 1, 1)
 
-        self.text_edit_ipmi_ip = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_ipmi_ip = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_ipmi_ip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_ip.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_ip.setObjectName("text_edit_ipmi_ip")
         self.gridLayout.addWidget(self.text_edit_ipmi_ip, 2, 4, 1, 1)
 
-        self.text_edit_ipmi_username = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_ipmi_username = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_ipmi_username.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_username.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_username.setObjectName("text_edit_ipmi_username")
         self.gridLayout.addWidget(self.text_edit_ipmi_username, 3, 4, 1, 1)
 
-        self.text_edit_ipmi_password = QPlainTextEdit(self.gridLayoutWidget)
+        self.text_edit_ipmi_password = QPlainTextEdit(self.gridLayoutWidget_1)
         self.text_edit_ipmi_password.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_password.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_ipmi_password.setObjectName("text_edit_ipmi_password")
         self.gridLayout.addWidget(self.text_edit_ipmi_password, 4, 4, 1, 1)
 
+        #添加复选框
+        self.checkbox_is_virtual_machine = QCheckBox(self)
+        self.checkbox_is_virtual_machine.setObjectName('checkbox_is_virtual_machine')
+        self.checkbox_is_virtual_machine.setGeometry(QRect(10, 140, 20, 20))
+        self.label_is_virtual_machine = QLabel(self)
+        self.label_is_virtual_machine.setObjectName("label_ipmi_password")
+        self.label_is_virtual_machine.setGeometry(QRect(30, 140, 60, 20))
+
+        # 添加栅格布局2
+        self.gridLayoutWidget_2 = QWidget(self)
+        self.gridLayoutWidget_2.setGeometry(QRect(10, 165, 430, 44))
+        self.gridLayoutWidget_2.setObjectName("gridLayoutWidget_2")
+        self.gridLayout = QGridLayout(self.gridLayoutWidget_2)
+        self.gridLayout.setContentsMargins(0, 0, 0, 0)
+        self.gridLayout.setObjectName("gridLayout")
+
+        # 设置界面上的各个标签布局
+        self.label_virtual_machine_name = QLabel(self.gridLayoutWidget_2)
+        self.label_virtual_machine_name.setObjectName("label_virtual_machine_name")
+        self.gridLayout.addWidget(self.label_virtual_machine_name, 1, 1, 1, 1)
+
+        self.label_host_username = QLabel(self.gridLayoutWidget_2)
+        self.label_host_username.setObjectName("label_host_username")
+        self.gridLayout.addWidget(self.label_host_username, 2, 1, 1, 1)
+
+        self.label_host_ip = QLabel(self.gridLayoutWidget_2)
+        self.label_host_ip.setObjectName("label_host_ip")
+        self.gridLayout.addWidget(self.label_host_ip, 1, 3, 1, 1)
+
+        self.label_host_password = QLabel(self.gridLayoutWidget_2)
+        self.label_host_password.setObjectName("label_host_password")
+        self.gridLayout.addWidget(self.label_host_password, 2, 3, 1, 1)
+
+        # 界面上个各个文本编辑框布局
+        self.text_edit_virtual_machine_name = QPlainTextEdit(self.gridLayoutWidget_2)
+        self.text_edit_virtual_machine_name.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_virtual_machine_name.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_virtual_machine_name.setObjectName("text_edit_virtual_machine_name")
+        self.gridLayout.addWidget(self.text_edit_virtual_machine_name, 1, 2, 1, 1)
+        self.text_edit_virtual_machine_name.setDisabled(True)
+
+        self.text_edit_host_username = QPlainTextEdit(self.gridLayoutWidget_2)
+        self.text_edit_host_username.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_username.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_username.setObjectName("text_edit_host_username")
+        self.gridLayout.addWidget(self.text_edit_host_username, 2, 2, 1, 1)
+        self.text_edit_host_username.setDisabled(True)
+
+        self.text_edit_host_ip = QPlainTextEdit(self.gridLayoutWidget_2)
+        self.text_edit_host_ip.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_ip.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_ip.setObjectName("text_edit_host_ip")
+        self.gridLayout.addWidget(self.text_edit_host_ip, 1, 4, 1, 1)
+        self.text_edit_host_ip.setDisabled(True)
+
+        self.text_edit_host_password = QPlainTextEdit(self.gridLayoutWidget_2)
+        self.text_edit_host_password.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_password.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_host_password.setObjectName("text_edit_host_password")
+        self.gridLayout.addWidget(self.text_edit_host_password, 2, 4, 1, 1)
+        self.text_edit_host_password.setDisabled(True)
+
         # 添加应用按钮
         self.btn_apply = QPushButton(self)
-        self.btn_apply.setGeometry(QRect(360, 120, 80, 25))
+        self.btn_apply.setGeometry(QRect(360, 220, 80, 25))
         self.btn_apply.setObjectName("button_apply")
         self.btn_apply.setDisabled(True)
 
@@ -746,8 +873,20 @@ class AddServerDlg(QDialog):
         self.text_edit_server_ip.textChanged.connect(self.changed_text_edit)
         self.text_edit_server_username.textChanged.connect(self.changed_text_edit)
         self.text_edit_server_password.textChanged.connect(self.changed_text_edit)
-
+        self.checkbox_is_virtual_machine.stateChanged.connect(self.changed_checkbox_is_virtual_machine)
         QMetaObject.connectSlotsByName(self)
+
+    def changed_checkbox_is_virtual_machine(self):
+        if self.checkbox_is_virtual_machine.isChecked() == True:
+            self.text_edit_virtual_machine_name.setDisabled(False)
+            self.text_edit_host_username.setDisabled(False)
+            self.text_edit_host_ip.setDisabled(False)
+            self.text_edit_host_password.setDisabled(False)
+        else:
+            self.text_edit_virtual_machine_name.setDisabled(True)
+            self.text_edit_host_username.setDisabled(True)
+            self.text_edit_host_ip.setDisabled(True)
+            self.text_edit_host_password.setDisabled(True)
 
     def changed_text_edit(self):
         new_group_name = self.text_edit_group_name.toPlainText()
@@ -782,7 +921,7 @@ class AddServerDlg(QDialog):
             self.btn_apply.setDisabled(True)
 
     def clicked_btn_apply(self):
-        mutex_lock.acquire()
+        mutex_lock_group_dict.acquire()
         #获取编辑框信息
         new_group_name = self.text_edit_group_name.toPlainText()
         new_server_name = self.text_edit_server_name.toPlainText()
@@ -792,6 +931,20 @@ class AddServerDlg(QDialog):
         new_ipmi_ip = self.text_edit_ipmi_ip.toPlainText()
         new_ipmi_username = self.text_edit_ipmi_username.toPlainText()
         new_ipmi_password = self.text_edit_ipmi_password.toPlainText()
+        new_os_type = self.text_edit_os_type.toPlainText()
+        if self.checkbox_is_virtual_machine.isChecked() == True:
+            new_virtual_flag = '0'
+            new_virtual_machine_name = self.text_edit_virtual_machine_name.toPlainText()
+            new_host_ip = self.text_edit_host_ip.toPlainText()
+            new_host_username = self.text_edit_host_username.toPlainText()
+            new_host_password = self.text_edit_host_password.toPlainText()
+        else:
+            new_virtual_flag = '1'
+            new_virtual_machine_name = ''
+            new_host_ip = ''
+            new_host_username = ''
+            new_host_password = ''
+
         if new_server_ip not in server_state_dict.keys():
             new_server = Server()
             new_server.server_name = new_server_name
@@ -801,6 +954,13 @@ class AddServerDlg(QDialog):
             new_server.ipmi_ip = new_ipmi_ip
             new_server.ipmi_username = new_ipmi_username
             new_server.ipmi_password = new_ipmi_password
+            new_server.os_type = new_os_type
+            new_server.virtual_flag = new_virtual_flag
+            new_server.virtual_machine_name = new_virtual_machine_name
+            new_server.host_ip = new_host_ip
+            new_server.host_username = new_host_username
+            new_server.host_password = new_host_password
+
             if new_group_name not in group_dict.keys():
                 new_group = Group()
                 new_group.addServer(new_server)
@@ -811,7 +971,7 @@ class AddServerDlg(QDialog):
             server_state_dict[new_server.server_ip] = ''
             ipmi_state_dict[new_server.server_ip] = ''
             self.sin1.emit()    #发射自定义信号（配置更新后发射信号）
-        mutex_lock.release()
+        mutex_lock_group_dict.release()
         self.close()
 
     def retranslateUi(self, Dialog):
@@ -821,11 +981,18 @@ class AddServerDlg(QDialog):
         self.label_server_ip.setText(_translate("Dialog", "*服务器IP地址"))
         self.label_server_username.setText(_translate("Dialog", "*用户名"))
         self.label_server_password.setText(_translate("Dialog", "*密码"))
+        self.label_os_type.setText(_translate("Dialog", "操作系统"))
         self.label_server_name.setText(_translate("Dialog", "服务器名"))
         self.label_ipmi_ip.setText(_translate("Dialog", "IPMI地址"))
         self.label_ipmi_username.setText(_translate("Dialog", "IPMI用户名"))
         self.label_ipmi_password.setText(_translate("Dialog", "IPMI密码"))
+        self.label_is_virtual_machine.setText(_translate("Dialog", "是否虚拟机"))
         self.btn_apply.setText(_translate("Dialog", "应用"))
+        self.label_virtual_machine_name.setText(_translate("Dialog", "虚拟机名"))
+        self.label_host_ip.setText(_translate("Dialog", "宿主机IP"))
+        self.label_host_username.setText(_translate("Dialog", "宿主机用户名"))
+        self.label_host_password.setText(_translate("Dialog", "宿主机密码"))
+
 
 class ModifyServerConfigDlg(AddServerDlg):
     def __init__(self, parent=None, selected_node_ip=None):
@@ -840,19 +1007,29 @@ class ModifyServerConfigDlg(AddServerDlg):
         for group_name in group_dict:
             for server_ip in group_dict[group_name].server_dict:
                 if selected_node_ip == server_ip:
+                    server = group_dict[group_name].server_dict[server_ip]
                     self.text_edit_group_name.setPlainText(group_name)
                     self.text_edit_group_name.setDisabled(True)
-                    self.text_edit_server_name.setPlainText(group_dict[group_name].server_dict[server_ip].server_name)
-                    self.text_edit_server_ip.setPlainText(group_dict[group_name].server_dict[server_ip].server_ip)
+                    self.text_edit_server_name.setPlainText(server.server_name)
+                    self.text_edit_server_ip.setPlainText(server.server_ip)
                     self.text_edit_server_ip.setDisabled(True)
-                    self.text_edit_server_username.setPlainText(group_dict[group_name].server_dict[server_ip].username)
-                    self.text_edit_server_password.setPlainText(group_dict[group_name].server_dict[server_ip].password)
-                    self.text_edit_ipmi_ip.setPlainText(group_dict[group_name].server_dict[server_ip].ipmi_ip)
-                    self.text_edit_ipmi_username.setPlainText(group_dict[group_name].server_dict[server_ip].ipmi_username)
-                    self.text_edit_ipmi_password.setPlainText(group_dict[group_name].server_dict[server_ip].ipmi_password)
+                    self.text_edit_server_username.setPlainText(server.username)
+                    self.text_edit_server_password.setPlainText(server.password)
+                    self.text_edit_ipmi_ip.setPlainText(server.ipmi_ip)
+                    self.text_edit_ipmi_username.setPlainText(server.ipmi_username)
+                    self.text_edit_ipmi_password.setPlainText(server.ipmi_password)
+                    self.text_edit_os_type.setPlainText(server.os_type)
+                    if server.virtual_flag == '0':
+                        self.checkbox_is_virtual_machine.setChecked(True)
+                        self.text_edit_virtual_machine_name.setPlainText(server.virtual_machine_name)
+                        self.text_edit_host_ip.setPlainText(server.host_ip)
+                        self.text_edit_host_username.setPlainText(server.host_username)
+                        self.text_edit_host_password.setPlainText(server.host_password)
+                    else:
+                        self.checkbox_is_virtual_machine.setChecked(False)
 
     def clicked_btn_apply(self):
-        mutex_lock.acquire()
+        mutex_lock_group_dict.acquire()
         #获取编辑框信息
         new_group_name = self.text_edit_group_name.toPlainText()
         new_server_name = self.text_edit_server_name.toPlainText()
@@ -862,7 +1039,19 @@ class ModifyServerConfigDlg(AddServerDlg):
         new_ipmi_ip = self.text_edit_ipmi_ip.toPlainText()
         new_ipmi_username = self.text_edit_ipmi_username.toPlainText()
         new_ipmi_password = self.text_edit_ipmi_password.toPlainText()
-        #if new_server_ip not in server_state_dict.keys():
+        new_os_type = self.text_edit_os_type.toPlainText()
+        if self.checkbox_is_virtual_machine.isChecked() == True:
+            new_virtual_flag = '0'
+            new_virtual_machine_name = self.text_edit_virtual_machine_name.toPlainText()
+            new_host_ip = self.text_edit_host_ip.toPlainText()
+            new_host_username = self.text_edit_host_username.toPlainText()
+            new_host_password = self.text_edit_host_password.toPlainText()
+        else:
+            new_virtual_flag = '1'
+            new_virtual_machine_name = ''
+            new_host_ip = ''
+            new_host_username = ''
+            new_host_password = ''
         new_server = Server()
         new_server.server_name = new_server_name
         new_server.server_ip = new_server_ip
@@ -871,6 +1060,12 @@ class ModifyServerConfigDlg(AddServerDlg):
         new_server.ipmi_ip = new_ipmi_ip
         new_server.ipmi_username = new_ipmi_username
         new_server.ipmi_password = new_ipmi_password
+        new_server.os_type = new_os_type
+        new_server.virtual_flag = new_virtual_flag
+        new_server.virtual_machine_name = new_virtual_machine_name
+        new_server.host_ip = new_host_ip
+        new_server.host_username = new_host_username
+        new_server.host_password = new_host_password
         if new_group_name not in group_dict.keys():
             new_group = Group()
             new_group.addServer(new_server)
@@ -881,21 +1076,8 @@ class ModifyServerConfigDlg(AddServerDlg):
         server_state_dict[new_server.server_ip] = ''
         ipmi_state_dict[new_server.server_ip] = ''
         self.sin1.emit()    #发射自定义信号（配置更新后发射信号）
-        mutex_lock.release()
+        mutex_lock_group_dict.release()
         self.close()
-
-    def retranslateUi(self, Dialog):
-        _translate = QCoreApplication.translate
-        Dialog.setWindowTitle(_translate("Dialog", "修改服务器信息"))
-        self.label_group_name.setText(_translate("Dialog", "*所属群组名"))
-        self.label_server_ip.setText(_translate("Dialog", "*服务器IP地址"))
-        self.label_server_username.setText(_translate("Dialog", "*用户名"))
-        self.label_server_password.setText(_translate("Dialog", "*密码"))
-        self.label_server_name.setText(_translate("Dialog", "服务器名"))
-        self.label_ipmi_ip.setText(_translate("Dialog", "IPMI地址"))
-        self.label_ipmi_username.setText(_translate("Dialog", "IPMI用户名"))
-        self.label_ipmi_password.setText(_translate("Dialog", "IPMI密码"))
-        self.btn_apply.setText(_translate("Dialog", "应用"))
 
 def read_config_from_xml_file(xml_file):
     if not os.path.exists(xml_file):
@@ -933,6 +1115,14 @@ def read_config_from_xml_file(xml_file):
                     new_server.virtual_flag = server.getAttribute("VirtualFlag")
                 if server.hasAttribute("OS"):
                     new_server.os_type = server.getAttribute("OS")
+                if server.hasAttribute("VirtualMachineName"):
+                    new_server.virtual_machine_name = server.getAttribute("VirtualMachineName")
+                if server.hasAttribute("HostIP"):
+                    new_server.host_ip = server.getAttribute("HostIP")
+                if server.hasAttribute("HostUsername"):
+                    new_server.host_username = server.getAttribute("HostUsername")
+                if server.hasAttribute("HostPassword"):
+                    new_server.host_password = server.getAttribute("HostPassword")
                 new_group.addServer(new_server)
             group_dict[new_group.group_name] = new_group
 
@@ -956,6 +1146,10 @@ def save_config_from_xml_file(xml_file):
             server_node.setAttribute('IPMIPassword', server.ipmi_password)
             server_node.setAttribute('VirtualFlag', server.virtual_flag)
             server_node.setAttribute('OS',server.os_type)
+            server_node.setAttribute('VirtualMachineName',server.virtual_machine_name)
+            server_node.setAttribute('HostIP',server.host_ip)
+            server_node.setAttribute('HostUsername',server.host_username)
+            server_node.setAttribute('HostPassword',server.host_password)
             group_node.appendChild(server_node) #把Server节点添加到Group节点中
         root.appendChild(group_node)    #把Group节点添加到根节点中
     fp = open(xml_file,'w')

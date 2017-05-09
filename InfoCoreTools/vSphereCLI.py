@@ -1,4 +1,4 @@
-# -*- coding:utf-8 -*-
+# -*- coding: utf-8 -*-
 
 import os
 import sys
@@ -74,6 +74,5 @@ def getVmxByVirtualMachineName(ip, username, password, name):
         if vmxNamePattern.search(vmx):
             return vmx
 
-#vm_list(r'192.168.4.66',r'root',r'infocore')
 #vmx = r'/vmfs/volumes/549af783-2bcf0b8c-edd4-001b21c5cdf2/沈晓阳7.0-192.168.5.150/沈晓阳7.0-192.168.5.150.vmx'
 #vm_start_soft(r'192.168.4.66',r'root',r'infocore',vmx)
