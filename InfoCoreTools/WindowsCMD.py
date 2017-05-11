@@ -15,10 +15,7 @@ SERVER_TOOL_PATH = r'C:\Users\Administrator\Desktop\OSNAutoTest\\'[:-1]
 
 #返回0表示能ping通，返回1表示不能ping通，如果ping不通，则需要4秒超时。
 def pingIP(ip):
-    #logger.debug(r'ping_ip:尝试ping {}'.format(ip))
     cmd = r"ping {} -n 1 1>nul 2>nul".format(ip)
-    #result = os.system(cmd)
-    #return result
     result = run(cmd , shell=True)
     return result.returncode
 
@@ -63,7 +60,7 @@ def isDisktestError(ip, username, password, logfile):
     flag = False
     result = ''
     resultFile = logfile.replace(r'C:', r'\\{}\c$'.format(ip))
-    local_path = os.path.dirname(__file__)
+    local_path = os.path.abspath(sys.argv[0])
     os.popen(r"net use \\{} {} /user:{} 2>nul".format(ip, password, username))
     if os.path.exists(resultFile):
         #output = os.popen(r'xcopy {} {}\ /y 2>nul'.format(result_file, local_path))
@@ -101,6 +98,28 @@ def copyfileTo(ip, username, password, sourceFile, destPath):
     os.popen(r"net use \\{} {} /user:{}".format(ip, password, username))
     os.popen(r"xcopy {} {} /y".format(sourceFile, destPath))
     os.popen(r"net use \\{} /d /y".format(ip))
+
+def copyTestToolTo(ip, username, password):
+    logging.debug('{}拷贝工具开始'.format(ip))
+    run(r"net use \\{} {} /user:{} 2>nul 1>nul".format(ip, password, username), shell=True)
+    logging.debug('连接管道 {}'.format(ip))
+    scrpit_run_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+    debugview = r'{}\InfoCoreTools\TestTools\Dbgview.exe'.format(scrpit_run_path)
+    startDebugview = r'{}\InfoCoreTools\TestTools\StartDbgview.bat'.format(scrpit_run_path)
+    osrbang = r'{}\InfoCoreTools\TestTools\osrbang.exe'.format(scrpit_run_path)
+    timesync = r'{}\InfoCoreTools\TestTools\TimeSync.bat'.format(scrpit_run_path)
+    destPath = SERVER_TOOL_PATH.replace(r'C:', r'\\{}\c$'.format(ip))
+    run(r'xcopy "{}" "{}" /y 2>nul 1>nul'.format(debugview, destPath),shell=True)
+    logging.debug('拷贝debugview工具到服务器{}'.format(ip))
+    run(r'xcopy "{}" "{}" /y 2>nul 1>nul'.format(startDebugview, destPath),shell=True)
+    logging.debug('拷贝debugview启动脚本到服务器{}'.format(ip))
+    run(r'xcopy "{}" "{}" /y 2>nul 1>nul'.format(osrbang, destPath),shell=True)
+    logging.debug('拷贝osnrbang工具到服务器{}'.format(ip))
+    run(r'xcopy "{}" "{}" /y 2>nul 1>nul'.format(timesync, destPath),shell=True)
+    logging.debug('拷贝同步时间脚本到服务器{}'.format(ip))
+    run(r'net use \\{} /d /y 2>nul 1>nul'.format(ip),shell=True)
+    logging.debug('释放管道{}'.format(ip))
+    logging.debug('拷贝工具到{}完毕,工具存放路径为{}'.format(ip,SERVER_TOOL_PATH))
 
 def collect_server_log(ip, username, password, current_time):
     logging.debug('收集{}日志开始'.format(ip))

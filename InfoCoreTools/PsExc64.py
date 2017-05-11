@@ -8,7 +8,7 @@ import logging
 import os
 
 logger = logging.getLogger('root.InfoCoreTools.Psexc64')
-psexec64 = r'{}\PStools\PsExec64.exe'.format(os.path.dirname(__file__))
+psexec64 = r'{}\InfoCoreTools\PStools\PsExec64.exe'.format(__file__)
 bang = r'C:\Users\Administrator\Desktop\OSNAutoTest\osrbang.exe'
 runDisktestBat = r'C:\Users\Administrator\Desktop\OSNAutoTest\RunDiskTest.bat'
 startDebugviewBat = r'C:\Users\Administrator\Desktop\OSNAutoTest\StartDbgview.bat'
