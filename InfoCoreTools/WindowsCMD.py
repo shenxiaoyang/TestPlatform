@@ -129,7 +129,7 @@ def collect_server_log(ip, username, password, current_time):
                                           current_time,
                                           str(ip).replace(r'.', r'_'))
     remoteOSNSolutionLog = OSNSOLUTION_INSTALL_PATH.replace(r'C:', r'\\{}\c$'.format(ip))
-    run(r'xcopy "{}\Repository\*"  "{}\OSN_log\" /y 2>nul 1>nul'.format(remoteOSNSolutionLog, localLogPath),shell=True)
+    run(r'xcopy "{}\Repository\*.db"  "{}\OSN_log\" /y 2>nul 1>nul'.format(remoteOSNSolutionLog, localLogPath),shell=True)
     logging.debug('拷贝{}的配置文件[.db]完毕'.format(ip))
     run(r'xcopy "{}\*.log" "{}\OSN_log\" /y 2>nul 1>nul'.format(remoteOSNSolutionLog, localLogPath),shell=True)
     logging.debug('拷贝{}的日志文件[.log]完毕'.format(ip))
