@@ -8,7 +8,4 @@
 			<Server HostIP="192.168.4.66" HostPassword="infocore" HostUsername="root" IPMIFlag="0" IPMIIP="" IPMIPassword="" IPMIUsername="" OS="Windows" ServerIP="192.168.5.152" ServerName="osn4" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0" VirtualMachineName="sxy-7.0-192.168.5.152"/>
 			<Server HostIP="192.168.4.66" HostPassword="infocore" HostUsername="root" IPMIFlag="0" IPMIIP="" IPMIPassword="" IPMIUsername="" OS="Windows" ServerIP="192.168.5.153" ServerName="osn4" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="0" VirtualMachineName="sxy-7.0-192.168.5.153"/>
 		</Group>
-		<Group GroupName="GroupTest">
-			<Server HostIP="" HostPassword="" HostUsername="" IPMIFlag="1" IPMIIP="192.168.9.84" IPMIPassword="PASSW0RD" IPMIUsername="USERID" OS="Windows" ServerIP="192.168.4.184" ServerName="OSN184" ServerPassword="infocore`1q" ServerUsername="administrator" VirtualFlag="1" VirtualMachineName=""/>
-		</Group>
 	</config>
