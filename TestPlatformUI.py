@@ -3,122 +3,38 @@
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
-import threading
 import time
-from xml.dom.minidom import parse
-import xml.dom.minidom
-import collections
-import os
-import sys
 import logging
 
 #定义日志记录器
 logger = logging.getLogger('root.TestPlatformUI')
 
 #导入自定义模块
-from InfoCoreTools import WindowsCMD,PsExc64,vSphereCLI,IPMI
+from InfoCoreTools import WindowsCMD,PsExc64
 
-#全局变量（注意：全局变量只在一个.py中生效）
-global GROUP_DICT
-global EVENT
-global SERVER_STATE_DICT
-global IPMI_STATE_DICT
-global SERVICE_LIST
-global SERVICE_STATE_DICT
-GROUP_DICT = collections.OrderedDict()
-EVENT = threading.Event()
-SERVER_STATE_DICT = {}  #0在线 1离线
-IPMI_STATE_DICT = {}
-SERVICE_STATE_DICT = {}
-SERVICE_LIST = ['OSNMirHBService',
-                'OSNScheduleService',
-                'OSNSPlatformService',
-                'OSNSDetectService',
-                'OSNService',
-                'OSNHBService']
+#导入全局变量
+from TestPlatformGlobalsVar import GROUP_DICT
+from TestPlatformGlobalsVar import EVENT
+from TestPlatformGlobalsVar import SERVER_STATE_DICT
+from TestPlatformGlobalsVar import IPMI_STATE_DICT
+from TestPlatformGlobalsVar import SERVICE_LIST
 
-class Group:
-    def __init__(self):
-        self.group_name = ''
-        self.group_id = ''
-        self.group_role = ''
-        self.server_dict = collections.OrderedDict()
-    def addServer(self, new_server):
-        self.server_dict[new_server.server_ip] = new_server
 
-class Server:
-    def __init__(self):
-        self.server_name = ''
-        self.server_id = ''
-        self.server_ip = ''
-        self.server_state = ''
-        self.username = ''
-        self.password = ''
-        self.ipmi_flag = '' #0未配置，1已配置，其他未知
-        self.ipmi_ip = ''
-        self.ipmi_username = ''
-        self.ipmi_password = ''
-        self.virtual_flag = ''
-        self.os_type = ''
-        self.virtual_machine_name = ''
-        self.host_ip = ''
-        self.host_username = ''
-        self.host_password = ''
+#导入线程类
+from TestPlatformThread import RefreshStateThread
+from TestPlatformThread import CopyTestToolsToThread
+from TestPlatformThread import CollectServerLogsThread
+from TestPlatformThread import StartVirtualMachineThread
+from TestPlatformThread import StopVirtualMachineThread
+from TestPlatformThread import PowerOnFromIPMIThread
+from TestPlatformThread import PowerOffFromIPMIThread
 
-#后台数据刷新线程
-#1、每隔5秒刷新一次服务器状态，
-class RefreshStateThread(threading.Thread):
-    daemon = True   #设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, name, parent=None):
-        super(RefreshStateThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-    def run(self):
-        while 1:
-            logging.debug('{} 定时刷新状态'.format(self.thread_name))
-            for group_name in GROUP_DICT:   #遍历所有群组
-                for server_ip in GROUP_DICT[group_name].server_dict:    #遍历群组下所有的服务器
-                    server = GROUP_DICT[group_name].server_dict[server_ip]
-                    get_ping_state_thread = GetPingStateThread(ip=server_ip)
-                    get_ping_state_thread.start()   #开一个ping线程，用于获取服务器状态
-                    if server.ipmi_flag == '1': #判断是否配置了IPMI
-                        get_power_state_thread = GetPowerStateFromIPMIThread(server.server_ip,
-                                                                             server.ipmi_ip,
-                                                                             server.ipmi_username,
-                                                                             server.ipmi_password)
-                        get_power_state_thread.start()  #开一个获取IPMI电源状态的线程
-            time.sleep(5)   #每隔5秒后台刷新一次状态
+#导入类模块
+from TestPlatformClass import Group
+from TestPlatformClass import Server
 
-class GetPingStateThread(threading.Thread):
-    daemon = True
-    def __init__(self, ip, name=None, parent=None):
-        super(GetPingStateThread, self).__init__(parent)
-        self.thread_name = name
-        self.ip = ip
-    def run(self):
-        #logging.debug('GetPingStateThread:ping {}'.format(self.ip))
-        old_state = SERVER_STATE_DICT[self.ip]
-        new_state = WindowsCMD.pingIP(self.ip)
-        if new_state != old_state:
-            SERVER_STATE_DICT[self.ip] = new_state
-            EVENT.set()
-
-class GetPowerStateFromIPMIThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, server_ip, ipmi_ip, ipmi_username, ipmi_password, name=None, parent=None):
-        super(GetPowerStateFromIPMIThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.server_ip = server_ip
-        self.ipmi_ip = ipmi_ip
-        self.ipmi_username = ipmi_username
-        self.ipmi_password = ipmi_password
-
-    def run(self):
-        logging.debug('GetPowerStateFromIPMIThread：获取{}电源状态'.format(self.ipmi_ip))
-        old_power_state = IPMI_STATE_DICT[self.server_ip]
-        new_power_state = IPMI.powerStatus(self.ipmi_ip, self.ipmi_username, self.ipmi_password)
-        if new_power_state != old_power_state:
-            IPMI_STATE_DICT[self.server_ip] = new_power_state
-            EVENT.set()
+#导入自定义函数
+from TestPlatformFuns import save_config_from_xml_file
 
 class MonitorUIThread(QThread):
     daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
@@ -135,93 +51,6 @@ class MonitorUIThread(QThread):
             self.signal_update_tree_server_state.emit() #发射信号
             self.signal_update_tab_1.emit()
             self.event.clear()  #重新设置线程阻塞
-
-class CollectServerLogsThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, server_ip, username, password, time, name=None, parent=None):
-        super(CollectServerLogsThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.server_ip = server_ip
-        self.username = username
-        self.password = password
-        self.time = time
-
-    def run(self):
-        logging.debug('准备收集{}日志'.format(self.server_ip))
-        WindowsCMD.collect_server_log(self.server_ip, self.username, self.password, self.time)
-
-class StartVirtualMachineThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, host_ip,host_username, host_password, virtual_machine_name, name=None, parent=None):
-        super(StartVirtualMachineThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.host_ip = host_ip
-        self.host_username = host_username
-        self.host_password = host_password
-        self.virtual_machine_name = virtual_machine_name
-
-    def run(self):
-        logging.debug('StartVirtualMachineThread：{}打开VM电源'.format(self.virtual_machine_name))
-        vSphereCLI.startVirtualMachineHard(self.host_ip,
-                                           self.host_username,
-                                           self.host_password,
-                                           self.virtual_machine_name)
-
-class StopVirtualMachineThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, host_ip,host_username, host_password, virtual_machine_name, name=None, parent=None):
-        super(StopVirtualMachineThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.host_ip = host_ip
-        self.host_username = host_username
-        self.host_password = host_password
-        self.virtual_machine_name = virtual_machine_name
-
-    def run(self):
-        logging.debug('StartVirtualMachineThread：{}关闭VM电源'.format(self.virtual_machine_name))
-        vSphereCLI.stopVirtualMachineHard(self.host_ip,
-                                          self.host_username,
-                                          self.host_password,
-                                          self.virtual_machine_name)
-
-class PowerOnFromIPMIThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, ipmi_ip,ipmi_username, ipmi_password, name=None, parent=None):
-        super(PowerOnFromIPMIThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.ipmi_ip = ipmi_ip
-        self.ipmi_username = ipmi_username
-        self.ipmi_password = ipmi_password
-
-    def run(self):
-        logging.debug('PowerOnFromIPMIThread：{}打开电源'.format(self.ipmi_ip))
-        IPMI.powerOn(self.ipmi_ip,self.ipmi_username,self.ipmi_password)
-
-class PowerOffFromIPMIThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, ipmi_ip,ipmi_username, ipmi_password, name=None, parent=None):
-        super(PowerOffFromIPMIThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.ipmi_ip = ipmi_ip
-        self.ipmi_username = ipmi_username
-        self.ipmi_password = ipmi_password
-
-    def run(self):
-        logging.debug('PowerOnFromIPMIThread：{}关闭电源'.format(self.ipmi_ip))
-        IPMI.powerOff(self.ipmi_ip,self.ipmi_username,self.ipmi_password)
-
-class CopyTestToolsToThread(threading.Thread):
-    daemon = True  # 设置True表示主线程关闭的时候，这个线程也会被关闭。[一般来说主线是用户UI线程]
-    def __init__(self, server_ip, username, password, name=None, parent=None):
-        super(CopyTestToolsToThread, self).__init__(parent)
-        self.thread_name = name  # 将传递过来的name构造到类中的name
-        self.server_ip = server_ip
-        self.username = username
-        self.password = password
-
-    def run(self):
-        logging.debug('CopyTestToolsToThread：{}关闭电源'.format(self.server_ip))
-        WindowsCMD.copyTestToolTo(self.server_ip,self.username,self.password)
 
 class MainWindows(QMainWindow):   #重载主窗体类，继承QtWidgets.QMainWindow
     def __init__(self, parent=None):    #主窗体构造函数
@@ -1264,105 +1093,3 @@ class ModifyServerConfigDlg(AddServerDlg):
         IPMI_STATE_DICT[new_server.server_ip] = ''
         self.sin1.emit()    #发射自定义信号（配置更新后发射信号）
         self.close()
-
-def read_config_from_xml_file(xml_file):
-    if not os.path.exists(xml_file):
-        logging.error('配置文件不存在，请检查./Sonfig目录下是否存在相应的配置文件')
-        sys.exit(1)
-    else:
-        logging.debug('读取配置文件 {}'.format(os.path.abspath(xml_file)))
-        dom = xml.dom.minidom.parse('./config/ServerConfig.xml')  #打开XML文档
-        root = dom.documentElement  #得到xml文档对象的root(config)节点
-        groups = root.getElementsByTagName("Group") #得到Group节点列表
-        for group in groups:
-            new_group = Group()
-            if group.hasAttribute("GroupName"):
-                new_group.group_name = group.getAttribute("GroupName")
-            servers = group.getElementsByTagName("Server")  #得到某个Gourp节点下Server节点列表
-            for server in servers:
-                new_server = Server()
-                if server.hasAttribute("ServerName"):
-                    new_server.server_name = server.getAttribute("ServerName")
-                if server.hasAttribute("ServerIP"):
-                    new_server.server_ip = server.getAttribute("ServerIP")
-                    SERVER_STATE_DICT[new_server.server_ip] = ''    #初始化服务器状态字典
-                    IPMI_STATE_DICT[new_server.server_ip] = ''
-                if server.hasAttribute("ServerUsername"):
-                    new_server.username = server.getAttribute("ServerUsername")
-                if server.hasAttribute("ServerPassword"):
-                    new_server.password = server.getAttribute("ServerPassword")
-                if server.hasAttribute("IPMIFlag"):
-                    new_server.ipmi_flag = server.getAttribute("IPMIFlag")
-                if server.hasAttribute("IPMIIP"):
-                    new_server.ipmi_ip = server.getAttribute("IPMIIP")
-                if server.hasAttribute("IPMIUsername"):
-                    new_server.ipmi_username = server.getAttribute("IPMIUsername")
-                if server.hasAttribute("IPMIPassword"):
-                    new_server.ipmi_password = server.getAttribute("IPMIPassword")
-                if server.hasAttribute("VirtualFlag"):
-                    new_server.virtual_flag = server.getAttribute("VirtualFlag")
-                if server.hasAttribute("OS"):
-                    new_server.os_type = server.getAttribute("OS")
-                if server.hasAttribute("VirtualMachineName"):
-                    new_server.virtual_machine_name = server.getAttribute("VirtualMachineName")
-                if server.hasAttribute("HostIP"):
-                    new_server.host_ip = server.getAttribute("HostIP")
-                if server.hasAttribute("HostUsername"):
-                    new_server.host_username = server.getAttribute("HostUsername")
-                if server.hasAttribute("HostPassword"):
-                    new_server.host_password = server.getAttribute("HostPassword")
-                new_group.addServer(new_server)
-            GROUP_DICT[new_group.group_name] = new_group
-
-def save_config_from_xml_file(xml_file):
-    doc = xml.dom.minidom.Document()    #在内存中创建一个空文档
-    root = doc.createElement('config')  #创建根节点对象
-    root.setAttribute('company', 'InfoCore')    #设置根节点属性
-    doc.appendChild(root)   #将根节点添加到文档对象中
-    for group_name in GROUP_DICT:  #遍历群组配置
-        group_node = doc.createElement('Group') #创建Group节点
-        group_node.setAttribute('GroupName', group_name)    #设置Group节点属性
-        for server_ip in GROUP_DICT[group_name].server_dict:    #遍历服务器配置
-            server = GROUP_DICT[group_name].server_dict[server_ip]
-            server_node = doc.createElement('Server')   #创建Server节点
-            server_node.setAttribute('ServerName',server.server_name)   #设置Server节点的ServerName属性
-            server_node.setAttribute('ServerIP',server.server_ip)   #设置Server节点的ServerIP属性
-            server_node.setAttribute('ServerUsername', server.username)
-            server_node.setAttribute('ServerPassword', server.password)
-            server_node.setAttribute('IPMIFlag', server.ipmi_flag)
-            server_node.setAttribute('IPMIIP', server.ipmi_ip)
-            server_node.setAttribute('IPMIUsername', server.ipmi_username)
-            server_node.setAttribute('IPMIPassword', server.ipmi_password)
-            server_node.setAttribute('VirtualFlag', server.virtual_flag)
-            server_node.setAttribute('OS',server.os_type)
-            server_node.setAttribute('VirtualMachineName',server.virtual_machine_name)
-            server_node.setAttribute('HostIP',server.host_ip)
-            server_node.setAttribute('HostUsername',server.host_username)
-            server_node.setAttribute('HostPassword',server.host_password)
-            group_node.appendChild(server_node) #把Server节点添加到Group节点中
-        root.appendChild(group_node)    #把Group节点添加到根节点中
-    fp = open(xml_file,'w')
-    doc.writexml(fp, indent='\t', addindent='\t', newl='\n')
-    fp.close()
-
-def get_server_struct_by_given_info(given_server_ip=None,given_ipmi_ip=None,given_virtual_machine_name=None):
-    if given_server_ip != None:
-        for group_name in GROUP_DICT:
-            for server_ip in GROUP_DICT[group_name].server_dict:
-                server = GROUP_DICT[group_name].server_dict[server_ip]
-                if given_server_ip == server_ip:
-                    return server
-
-    if given_ipmi_ip != None:
-        for group_name in GROUP_DICT:
-            for server_ip in GROUP_DICT[group_name].server_dict:
-                server = GROUP_DICT[group_name].server_dict[server_ip]
-                if server.ipmi_ip == given_ipmi_ip:
-                    return server
-
-    if given_virtual_machine_name != None:
-        for group_name in GROUP_DICT:
-            for server_ip in GROUP_DICT[group_name].server_dict:
-                server = GROUP_DICT[group_name].server_dict[server_ip]
-                if server.virtual_machine_name == given_virtual_machine_name:
-                    return server

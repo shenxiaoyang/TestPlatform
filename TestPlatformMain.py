@@ -12,8 +12,11 @@ if not os.path.exists(r'.\log'):
 logging.config.fileConfig(r'.\config\logger.conf')
 logger = logging.getLogger('root.main')
 
-#加载自定义模块
-from TestPlatformUI import MainWindows,read_config_from_xml_file
+#加载自定义UI模块
+from TestPlatformUI import MainWindows
+
+#加载自定义函数
+from TestPlatformFuns import read_config_from_xml_file
 
 if __name__ == "__main__":
     try:
